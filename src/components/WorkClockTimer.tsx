@@ -5,8 +5,8 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
-  Dimensions,
-  Animated,
+  useWindowDimensions,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { triggerHaptic } from '../utils/haptics';
@@ -26,12 +26,18 @@ interface WallpaperStyle {
   glowColor: string;
 }
 
+interface StopwatchLap {
+  id: number;
+  splitTime: number;   // total cumulative ms
+  lapDuration: number; // ms for this individual lap
+}
+
 const WALLPAPERS: Record<ClockWallpaper, WallpaperStyle> = {
   midnight: {
     id: 'midnight',
     name: 'Midnight OLED',
     bg: '#000000',
-    cardBg: 'rgba(255, 255, 255, 0.05)',
+    cardBg: 'rgba(255, 255, 255, 0.06)',
     accent: '#38BDF8', // Light Blue
     textPrimary: '#FFFFFF',
     textMuted: '#64748B',
@@ -80,31 +86,38 @@ const WALLPAPERS: Record<ClockWallpaper, WallpaperStyle> = {
 };
 
 export const WorkClockTimer: React.FC = () => {
+  const { width, height } = useWindowDimensions();
+  const isPhysicalLandscape = width > height;
+
   const [mode, setMode] = useState<ClockMode>('clock');
   const [wallpaperId, setWallpaperId] = useState<ClockWallpaper>('midnight');
-  const [isHorizontal, setIsHorizontal] = useState(false);
+  const [manualForceLandscape, setManualForceLandscape] = useState(false);
   const [showWallpaperMenu, setShowWallpaperMenu] = useState(false);
+
+  // When device is tilted sideways (width > height) OR user tapped manual toggle
+  const isHorizontal = isPhysicalLandscape || manualForceLandscape;
 
   // Live Clock State
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Focus Timer (Pomodoro) State: Default 25 min (1500 sec)
   const [focusSecondsLeft, setFocusSecondsLeft] = useState(25 * 60);
-  const [focusInitialDuration, setFocusInitialDuration] = useState(25 * 60);
+  const [focusInitialDuration] = useState(25 * 60);
   const [isFocusRunning, setIsFocusRunning] = useState(false);
 
   // Workout Interval Timer State
   const [workoutRound, setWorkoutRound] = useState(1);
-  const [workoutTotalRounds, setWorkoutTotalRounds] = useState(5);
+  const [workoutTotalRounds] = useState(5);
   const [workoutPhase, setWorkoutPhase] = useState<'work' | 'rest'>('work');
   const [workoutSecondsLeft, setWorkoutSecondsLeft] = useState(40);
-  const [workoutWorkDuration, setWorkoutWorkDuration] = useState(40);
-  const [workoutRestDuration, setWorkoutRestDuration] = useState(20);
+  const [workoutWorkDuration] = useState(40);
+  const [workoutRestDuration] = useState(20);
   const [isWorkoutRunning, setIsWorkoutRunning] = useState(false);
 
-  // Stopwatch State
+  // Stopwatch State with Lap Support
   const [stopwatchMs, setStopwatchMs] = useState(0);
   const [isStopwatchRunning, setIsStopwatchRunning] = useState(false);
+  const [laps, setLaps] = useState<StopwatchLap[]>([]);
 
   const wp = WALLPAPERS[wallpaperId];
 
@@ -166,7 +179,7 @@ export const WorkClockTimer: React.FC = () => {
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isWorkoutRunning, workoutSecondsLeft, workoutPhase, workoutRound, workoutTotalRounds]);
+  }, [isWorkoutRunning, workoutSecondsLeft, workoutPhase, workoutRound, workoutTotalRounds, workoutRestDuration, workoutWorkDuration]);
 
   // Stopwatch Effect
   useEffect(() => {
@@ -204,16 +217,37 @@ export const WorkClockTimer: React.FC = () => {
     setWorkoutSecondsLeft(workoutWorkDuration);
   };
 
+  // Stopwatch Handlers with Lap Tracking
   const toggleStopwatch = () => {
     triggerHaptic('medium');
     setIsStopwatchRunning(!isStopwatchRunning);
+  };
+
+  const recordLap = () => {
+    if (!isStopwatchRunning || stopwatchMs === 0) return;
+    triggerHaptic('medium');
+    const prevSplit = laps.length > 0 ? laps[0].splitTime : 0;
+    const lapDuration = stopwatchMs - prevSplit;
+    const newLap: StopwatchLap = {
+      id: laps.length + 1,
+      splitTime: stopwatchMs,
+      lapDuration: lapDuration > 0 ? lapDuration : stopwatchMs,
+    };
+    setLaps([newLap, ...laps]);
   };
 
   const resetStopwatch = () => {
     triggerHaptic('light');
     setIsStopwatchRunning(false);
     setStopwatchMs(0);
+    setLaps([]);
   };
+
+  // Fastest & Slowest Lap calculation
+  const fastestLapDuration =
+    laps.length >= 2 ? Math.min(...laps.map((l) => l.lapDuration)) : -1;
+  const slowestLapDuration =
+    laps.length >= 2 ? Math.max(...laps.map((l) => l.lapDuration)) : -1;
 
   // Formatters
   const hours = String(currentTime.getHours()).padStart(2, '0');
@@ -286,7 +320,7 @@ export const WorkClockTimer: React.FC = () => {
             <Ionicons name="color-palette-outline" size={18} color={wp.accent} />
           </TouchableOpacity>
 
-          {/* Horizontal / Landscape toggle */}
+          {/* Horizontal / Landscape toggle button */}
           <TouchableOpacity
             style={[
               styles.actionIconBtn,
@@ -294,9 +328,9 @@ export const WorkClockTimer: React.FC = () => {
             ]}
             onPress={() => {
               triggerHaptic('medium');
-              setIsHorizontal(!isHorizontal);
+              setManualForceLandscape(!manualForceLandscape);
             }}
-            accessibilityLabel="Toggle Horizontal Desk Mode"
+            accessibilityLabel={isHorizontal ? 'Switch to Portrait' : 'Switch to Horizontal'}
           >
             <Ionicons
               name={isHorizontal ? 'phone-portrait-outline' : 'phone-landscape-outline'}
@@ -335,6 +369,7 @@ export const WorkClockTimer: React.FC = () => {
 
       {/* Main Display Area */}
       <View style={[styles.displayArea, isHorizontal && styles.displayAreaHorizontal]}>
+        {/* Clock Mode */}
         {mode === 'clock' && (
           <View style={styles.clockCenter}>
             <Text style={[styles.dateText, { color: wp.accent }]}>{dateString.toUpperCase()}</Text>
@@ -354,6 +389,7 @@ export const WorkClockTimer: React.FC = () => {
           </View>
         )}
 
+        {/* Focus / Pomodoro Mode */}
         {mode === 'focus' && (
           <View style={styles.clockCenter}>
             <Text style={[styles.statusTag, { color: wp.accent }]}>
@@ -393,6 +429,7 @@ export const WorkClockTimer: React.FC = () => {
           </View>
         )}
 
+        {/* Workout Interval Mode */}
         {mode === 'workout' && (
           <View style={styles.clockCenter}>
             <View style={styles.workoutHeader}>
@@ -456,8 +493,9 @@ export const WorkClockTimer: React.FC = () => {
           </View>
         )}
 
+        {/* Stopwatch Mode with Laps */}
         {mode === 'stopwatch' && (
-          <View style={styles.clockCenter}>
+          <View style={[styles.clockCenter, styles.stopwatchContainer]}>
             <Text style={[styles.statusTag, { color: wp.accent }]}>CHRONOGRAPH</Text>
             <Text
               style={[
@@ -470,8 +508,9 @@ export const WorkClockTimer: React.FC = () => {
               {formatStopwatch(stopwatchMs)}
             </Text>
 
-            {/* Controls */}
+            {/* Controls Row: Start/Pause + Lap/Reset */}
             <View style={styles.controlsRow}>
+              {/* Primary Play/Pause/Resume */}
               <TouchableOpacity
                 style={[styles.timerMainBtn, { backgroundColor: wp.accent }]}
                 onPress={toggleStopwatch}
@@ -481,16 +520,101 @@ export const WorkClockTimer: React.FC = () => {
                   size={24}
                   color="#FFFFFF"
                 />
-                <Text style={styles.btnLabel}>{isStopwatchRunning ? 'Pause' : 'Start'}</Text>
+                <Text style={styles.btnLabel}>
+                  {isStopwatchRunning ? 'Pause' : stopwatchMs > 0 ? 'Resume' : 'Start'}
+                </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.timerSecondaryBtn, { backgroundColor: wp.cardBg }]}
-                onPress={resetStopwatch}
-              >
-                <Ionicons name="refresh" size={20} color={wp.textPrimary} />
-              </TouchableOpacity>
+              {/* Secondary Button: LAP when running, RESET when stopped */}
+              {isStopwatchRunning ? (
+                <TouchableOpacity
+                  style={[
+                    styles.lapActionBtn,
+                    { backgroundColor: wp.cardBg, borderColor: wp.accent },
+                  ]}
+                  onPress={recordLap}
+                  accessibilityLabel="Record Lap"
+                >
+                  <Ionicons name="flag-outline" size={18} color={wp.accent} />
+                  <Text style={[styles.lapActionText, { color: wp.accent }]}>Lap</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.timerSecondaryBtn,
+                    { backgroundColor: wp.cardBg, opacity: stopwatchMs > 0 ? 1 : 0.4 },
+                  ]}
+                  onPress={resetStopwatch}
+                  disabled={stopwatchMs === 0}
+                  accessibilityLabel="Reset Stopwatch"
+                >
+                  <Ionicons name="refresh" size={20} color={wp.textPrimary} />
+                </TouchableOpacity>
+              )}
             </View>
+
+            {/* Lap History List */}
+            {laps.length > 0 && (
+              <View
+                style={[
+                  styles.lapListContainer,
+                  {
+                    backgroundColor: wp.cardBg,
+                    borderColor: 'rgba(255, 255, 255, 0.08)',
+                    maxHeight: isHorizontal ? 120 : 200,
+                  },
+                ]}
+              >
+                <View style={styles.lapListHeader}>
+                  <Text style={[styles.lapHeaderLabel, { color: wp.textMuted }]}>LAP</Text>
+                  <Text style={[styles.lapHeaderLabel, { color: wp.textMuted, textAlign: 'center' }]}>
+                    LAP TIME
+                  </Text>
+                  <Text style={[styles.lapHeaderLabel, { color: wp.textMuted, textAlign: 'right' }]}>
+                    SPLIT
+                  </Text>
+                </View>
+
+                <ScrollView
+                  style={styles.lapScrollView}
+                  showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled={true}
+                >
+                  {laps.map((lap) => {
+                    const isFastest = laps.length >= 2 && lap.lapDuration === fastestLapDuration;
+                    const isSlowest = laps.length >= 2 && lap.lapDuration === slowestLapDuration;
+                    const rowColor = isFastest ? '#34D399' : isSlowest ? '#F87171' : wp.textPrimary;
+
+                    return (
+                      <View
+                        key={lap.id}
+                        style={[
+                          styles.lapRow,
+                          isFastest && styles.lapRowFastest,
+                          isSlowest && styles.lapRowSlowest,
+                        ]}
+                      >
+                        <View style={styles.lapColLeft}>
+                          <Text style={[styles.lapNumText, { color: rowColor }]}>
+                            Lap {lap.id}
+                          </Text>
+                          {isFastest && <Text style={styles.fastestTag}>Fastest</Text>}
+                          {isSlowest && <Text style={styles.slowestTag}>Slowest</Text>}
+                        </View>
+
+                        <Text style={[styles.lapDurationText, { color: rowColor }]}>
+                          {formatStopwatch(lap.lapDuration)}
+                        </Text>
+
+                        <Text style={[styles.lapSplitText, { color: wp.textMuted }]}>
+                          {formatStopwatch(lap.splitTime)}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -579,15 +703,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 16,
   },
   displayAreaHorizontal: {
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   clockCenter: {
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
+  },
+  stopwatchContainer: {
+    flex: 1,
+    justifyContent: 'center',
   },
   dateText: {
     fontSize: 13,
@@ -610,7 +738,7 @@ const styles = StyleSheet.create({
     fontSize: 88,
   },
   stopwatchDigit: {
-    fontSize: 54,
+    fontSize: 52,
   },
   secondDigit: {
     fontSize: 24,
@@ -628,7 +756,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.5,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   workoutHeader: {
     alignItems: 'center',
@@ -653,7 +781,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    marginTop: 24,
+    marginTop: 18,
+    marginBottom: 14,
   },
   timerMainBtn: {
     flexDirection: 'row',
@@ -674,5 +803,103 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  lapActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    gap: 6,
+  },
+  lapActionText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  lapListContainer: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 6,
+  },
+  lapListHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  lapHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    flex: 1,
+  },
+  lapScrollView: {
+    marginTop: 4,
+  },
+  lapRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.04)',
+  },
+  lapRowFastest: {
+    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+    borderRadius: 8,
+  },
+  lapRowSlowest: {
+    backgroundColor: 'rgba(248, 113, 113, 0.08)',
+    borderRadius: 8,
+  },
+  lapColLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  lapNumText: {
+    fontSize: 13,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  fastestTag: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#34D399',
+    backgroundColor: 'rgba(52, 211, 153, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  slowestTag: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#F87171',
+    backgroundColor: 'rgba(248, 113, 113, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  lapDurationText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  lapSplitText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
   },
 });
