@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "habit-tracker-app",
-    "slug": "habit-tracker-app",
+    "name": "Habit Tracker & Focus Clock",
+    "slug": "habit-tracker-and-focus-clock",
+    "owner": "karanmilkes-team",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -21,6 +22,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0dd4c0ec-ef97-4b0f-8c91-fd0009f34416"
+      }
     }
   }
 }
